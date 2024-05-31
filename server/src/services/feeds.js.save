@@ -1,0 +1,146 @@
+const pool = require('../database');
+const mqtt = require('mqtt')
+
+
+
+async function getAllFeed() {
+    const [rows] = await pool.query('select * from feed');
+    return rows;
+}
+
+async function getAllSensor() {
+    const [rows] = await pool.query(`select * from feed where type='sensor'`);
+    return rows;
+}
+
+async function getAllButton() {
+    const [rows] = await pool.query(`select * from feed where type='button'`);
+    return rows;
+}
+
+async function getFeed(feedKey) {
+    const [rows] = await pool.query('select * from feed where feedKey=?', [feedKey]);
+    return rows[0];
+}
+
+async function updateStatus(feedKey, newStatus) {
+    const [rows] = await pool.query('call updateStatus(?,?);', [feedKey, newStatus]);
+    message = [];
+    message.push(feedKey);
+    message.push(newStatus);
+    publishFeed(message); // publish message to mqtt broker
+    return rows[0][0];
+}
+
+async function updateStatusFromGateway(feedKey, newStatus) {
+    const [rows] = await pool.query('call updateStatus(?,?);', [feedKey, newStatus]);
+    return rows[0][0];
+}
+
+async function updateAutomation(feedKey, automationStatus) {
+    const [rows] = await pool.query('call updateAutomation(?,?);', [feedKey, automationStatus]);
+    //TODO
+    message = []
+    message.push(feedKey); 
+    message.push(automationStatus); 
+    publishAutomation(message); 
+    return rows[0][0];
+}
+
+async function publishAutomation(feedStatus) {
+    const clientId = `mqtt_${Math.random().toString(16).slice(3)}`;                                 // client ID
+    const connectUrl = `mqtt://${process.env.MQTT_BROKER_HOST}:${process.env.MQTT_BROKER_PORT}`;    // mqtt broker url
+    const topic = process.env.AUTOMATION_CHANNEL;                                                         // topic to subcribe
+    // Create a mqtt connection object and configuration of itself
+    const client = mqtt.connect(connectUrl, {
+        clientId,
+        clean: true,
+        connectTimeout: 4000,
+        username: process.env.MQTT_BROKER_USERNAME,
+        password: process.env.MQTT_BROKER_PASSWORD,
+        reconnectPeriod: 1000,
+    })
+
+    // Subcribe to topic on MQTT broker
+    client.on('connect', () => {
+        console.log('Connected');
+        // subcribe step
+        // feedStatus is in Json
+        client.publish(topic, JSON.stringify(feedStatus), { qos: 0, retain: false },
+        (error) => {
+            if (error) {
+                console.log(error); 
+            }
+        });
+    })
+}
+
+async function subscribeFeed() {
+    const clientId = `mqtt_${Math.random().toString(16).slice(3)}`;                                 // client ID
+    const connectUrl = `mqtt://${process.env.MQTT_BROKER_HOST}:${process.env.MQTT_BROKER_PORT}`;    // mqtt broker url
+    const topic = process.env.FEED_CHANNEL;                                                         // topic to subcribe
+    // Create a mqtt connection object and configuration of itself
+    const client = mqtt.connect(connectUrl, {
+        clientId,
+        clean: true,
+        connectTimeout: 4000,
+        username: process.env.MQTT_BROKER_USERNAME,
+        password: process.env.MQTT_BROKER_PASSWORD,
+        reconnectPeriod: 1000,
+    })
+
+    // Subcribe to topic on MQTT broker
+    client.on('connect', () => {
+        console.log('Connected');
+        // subcribe step
+        client.subscribe([topic], () => {
+            console.log(`Subscribe to topic '${topic}'`)
+        });
+    })
+
+    let dataMessage;
+    client.on('message', (topic, payload) => {
+        console.log('Received Message:', topic, payload.toString());
+        dataMessage = payload.toString();
+
+        /**
+         * Insert new data into Database
+         */
+        var dataObject = JSON.parse(dataMessage);
+        console.log(dataObject);                            // Convert Json to Object 
+        updateStatusFromGateway(dataObject["feedKey"],dataObject["status"]); // post new data to database 
+        console.log("Success");
+    })
+}
+
+
+
+async function publishFeed(feedStatus) {
+    const clientId = `mqtt_${Math.random().toString(16).slice(3)}`;                                 // client ID
+    const connectUrl = `mqtt://${process.env.MQTT_BROKER_HOST}:${process.env.MQTT_BROKER_PORT}`;    // mqtt broker url
+    const topic = process.env.FEED_CHANNEL;                                                         // topic to subcribe
+    // Create a mqtt connection object and configuration of itself
+    const client = mqtt.connect(connectUrl, {
+        clientId,
+        clean: true,
+        connectTimeout: 4000,
+        username: process.env.MQTT_BROKER_USERNAME,
+        password: process.env.MQTT_BROKER_PASSWORD,
+        reconnectPeriod: 1000,
+    })
+
+    // Subcribe to topic on MQTT broker
+    client.on('connect', () => {
+        console.log('Connected');
+        // subcribe step
+        // feedStatus is in Json
+        client.publish(topic, JSON.stringify(feedStatus), { qos: 0, retain: false },
+        (error) => {
+            if (error) {
+                console.log(error); 
+            }
+        });
+    })
+}
+
+module.exports = { getAllFeed, getAllSensor, getAllButton, getFeed, updateStatus, subscribeFeed, updateAutomation };
